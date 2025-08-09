@@ -10,16 +10,71 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
+      - name: Generate version
+        id: gen_version
+        run: |
+          VER=$(grep -Po '(?<=const val versionName = ")[0-9]+\.[0-9]+' ./buildSrc/src/main/kotlin/com/example/util/simpletimetracker/Base.kt)
+          VER_NEW=${VER}_$(echo "${{ github.sha }}" | head -c7)
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "version_new=$VER_NEW" >> $GITHUB_OUTPUT
+          echo "apk_name=SimpleTimeTracker-base-release-${VER_NEW}.apk" >> $GITHUB_OUTPUT
+
+      - name: Fix version
+        run: sed -i 's/${{ steps.gen_version.outputs.version }}/${{ steps.gen_version.outputs.version_new }}/' ./buildSrc/src/main/kotlin/com/example/util/simpletimetracker/Base.kt
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '21'
+          cache: 'gradle'
 
       - name: Build
-        run: ./gradlew assemblePlayDebug
+        run: ./gradlew assembleBaseRelease
 
-      - name: Upload
-        uses: actions/upload-artifact@v4
+      - name: Get path of created apk
+        id: retrieve_path
+        run: echo "path=$(find app/build/outputs/apk/ -type f -name '*.apk')" >> $GITHUB_OUTPUT
+
+      - name: Set up keystore
+        run: |
+          mkdir -p $RUNNER_TEMP/keystores
+          echo "${{ secrets.KEYSTORE_FILE }}" | base64 --decode > $RUNNER_TEMP/keystores/keystore.jks
+
+      - name: Sign apk
+        run: |
+          sudo apt install -y --no-install-recommends apksigner
+          apksigner sign \
+            --ks $RUNNER_TEMP/keystores/keystore.jks \
+            --ks-pass "pass:${{ secrets.KEYSTORE_PASSWORD }}" \
+            --ks-key-alias ${{ secrets.KEY_ALIAS }} \
+            --in ${{ steps.retrieve_path.outputs.path }} \
+            --out ${{ steps.gen_version.outputs.apk_name }}
+
+      - name: Upload artifact
+        id: upload_artifact
+        uses: actions/upload-artifact@v7
         with:
-          path: app/build/outputs/apk/play/debug/*.apk
+          path: ${{ steps.gen_version.outputs.apk_name }}
+          archive: false
+
+      - name: Create release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          release_name: ${{ steps.gen_version.outputs.version_new }}
+          tag_name: ${{ steps.gen_version.outputs.version_new }}
+          draft: false
+          prerelease: false
+
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_content_type: application/vnd.android.package-archive
+          asset_path: ${{ steps.gen_version.outputs.apk_name }}
+          asset_name: ${{ steps.gen_version.outputs.apk_name }}

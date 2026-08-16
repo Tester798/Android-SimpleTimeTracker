@@ -30,6 +30,7 @@ import com.example.util.simpletimetracker.domain.complexRule.model.ComplexRule
 import com.example.util.simpletimetracker.domain.daysOfWeek.model.DayOfWeek
 import com.example.util.simpletimetracker.domain.record.model.Record
 import com.example.util.simpletimetracker.domain.record.model.RecordBase
+import com.example.util.simpletimetracker.domain.record.model.RunningRecord
 import com.example.util.simpletimetracker.domain.recordType.model.RecordType
 import com.example.util.simpletimetracker.feature_base_adapter.buttonsRow.view.ButtonsRowViewData
 import com.example.util.simpletimetracker.feature_dialogs.dateTime.CustomDatePicker
@@ -135,6 +136,7 @@ class SettingsBackupTest : BaseUiTest() {
         runBlocking {
             test(activityDataList, recordTypeRepo.getAll())
             test(recordDataList, testUtils.recordInteractor.getAll())
+            test(runningRecordDataList, testUtils.runningRecordInteractor.getAll())
             if (databaseVersion == DatabaseVersion.VER_28) {
                 test(suggestionsDataList, testUtils.activitySuggestionInteractor.getAll())
             }
@@ -1087,6 +1089,14 @@ class SettingsBackupTest : BaseUiTest() {
         Record(2, 2, 1727089200000, 1727092800000, "", listOf(RecordBase.Tag(2, null), RecordBase.Tag(3, null))),
         Record(4, 3, 1727082000000, 1727085600000, "record comment", listOf(RecordBase.Tag(3, null))),
         Record(5, 4, 1727071200000, 1727078400000, "", emptyList()),
+    )
+    private val runningRecordDataList = listOf(
+        RunningRecord(
+            id = 2,
+            timeStarted = 1727103600000,
+            comment = "running record comment",
+            tags = listOf(RecordBase.Tag(3, 42.5)),
+        ),
     )
     private val activityFilterList = listOf(
         ActivityFilterTestData("filter1", ColorTestData.Position(0)),

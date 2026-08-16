@@ -43,3 +43,5 @@ complexRule	1	0	0		1	2	1100000
 complexRule	2	0	1			3	0000000
 complexRule	3	0	2	1,2	1	2	0000000
 prefs	showActivityFilters	1
+runningRecord	2	1727103600000	running record comment
+runningRecordToRecordTag	2	3	42.5

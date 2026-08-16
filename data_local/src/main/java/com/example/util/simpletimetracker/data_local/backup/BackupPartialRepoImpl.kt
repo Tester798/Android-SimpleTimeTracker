@@ -355,6 +355,8 @@ class BackupPartialRepoImpl @Inject constructor(
             dataHandler = DataHandler(
                 types = types::add,
                 records = records::add,
+                runningRecords = {},
+                runningRecordToTag = {},
                 recordShortcuts = recordShortcuts::add,
                 categories = categories::add,
                 typeToCategory = typeToCategory::add,

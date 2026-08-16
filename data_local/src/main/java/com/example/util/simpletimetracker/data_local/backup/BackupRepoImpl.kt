@@ -40,7 +40,9 @@ import com.example.util.simpletimetracker.domain.favourite.repo.RecordTypeToFavo
 import com.example.util.simpletimetracker.domain.prefs.interactor.PrefsInteractor
 import com.example.util.simpletimetracker.domain.record.model.Record
 import com.example.util.simpletimetracker.domain.record.model.RecordBase
+import com.example.util.simpletimetracker.domain.record.model.RunningRecord
 import com.example.util.simpletimetracker.domain.record.repo.RecordRepo
+import com.example.util.simpletimetracker.domain.record.repo.RunningRecordRepo
 import com.example.util.simpletimetracker.domain.recordShortcut.model.RecordShortcut
 import com.example.util.simpletimetracker.domain.recordShortcut.repo.RecordShortcutRepo
 import com.example.util.simpletimetracker.domain.recordTag.model.RecordShortcutToRecordTag
@@ -49,11 +51,13 @@ import com.example.util.simpletimetracker.domain.recordTag.model.RecordTagValueT
 import com.example.util.simpletimetracker.domain.recordTag.model.RecordToRecordTag
 import com.example.util.simpletimetracker.domain.recordTag.model.RecordTypeToDefaultTag
 import com.example.util.simpletimetracker.domain.recordTag.model.RecordTypeToTag
+import com.example.util.simpletimetracker.domain.recordTag.model.RunningRecordToRecordTag
 import com.example.util.simpletimetracker.domain.recordTag.repo.RecordShortcutToRecordTagRepo
 import com.example.util.simpletimetracker.domain.recordTag.repo.RecordTagRepo
 import com.example.util.simpletimetracker.domain.recordTag.repo.RecordToRecordTagRepo
 import com.example.util.simpletimetracker.domain.recordTag.repo.RecordTypeToDefaultTagRepo
 import com.example.util.simpletimetracker.domain.recordTag.repo.RecordTypeToTagRepo
+import com.example.util.simpletimetracker.domain.recordTag.repo.RunningRecordToRecordTagRepo
 import com.example.util.simpletimetracker.domain.recordType.model.RecordType
 import com.example.util.simpletimetracker.domain.recordType.model.RecordTypeGoal
 import com.example.util.simpletimetracker.domain.recordType.repo.RecordTypeGoalRepo
@@ -79,6 +83,8 @@ class BackupRepoImpl @Inject constructor(
     private val contentResolver: ContentResolver,
     private val recordTypeRepo: RecordTypeRepo,
     private val recordRepo: RecordRepo,
+    private val runningRecordRepo: RunningRecordRepo,
+    private val runningRecordToRecordTagRepo: RunningRecordToRecordTagRepo,
     private val categoryRepo: CategoryRepo,
     private val recordTypeCategoryRepo: RecordTypeCategoryRepo,
     private val recordTypeToTagRepo: RecordTypeToTagRepo,
@@ -152,6 +158,18 @@ class BackupRepoImpl @Inject constructor(
             if (saveRecords) {
                 recordToRecordTagRepo.getAll().forEach {
                     fileOutputStream?.write(it.let(::toBackupString).toByteArray())
+                }
+                runningRecordRepo.getAll().forEach { runningRecord ->
+                    fileOutputStream?.write(runningRecord.let(::toBackupString).toByteArray())
+                    runningRecord.tags.forEach { tag ->
+                        RunningRecordToRecordTag(
+                            runningRecordId = runningRecord.id,
+                            recordTagId = tag.tagId,
+                            recordTagNumericValue = tag.numericValue,
+                        ).let(::toBackupString).let {
+                            fileOutputStream?.write(it.toByteArray())
+                        }
+                    }
                 }
             }
             recordShortcutToRecordTagRepo.getAll().forEach {
@@ -241,6 +259,18 @@ class BackupRepoImpl @Inject constructor(
             dataHandler = DataHandler(
                 types = recordTypeRepo::add,
                 records = recordRepo::add,
+                runningRecords = runningRecordRepo::add,
+                runningRecordToTag = {
+                    runningRecordToRecordTagRepo.addRunningRecordTags(
+                        runningRecordId = it.runningRecordId,
+                        tags = listOf(
+                            RecordBase.Tag(
+                                tagId = it.recordTagId,
+                                numericValue = it.recordTagNumericValue,
+                            ),
+                        ),
+                    )
+                },
                 recordShortcuts = recordShortcutRepo::add,
                 categories = categoryRepo::add,
                 typeToCategory = recordTypeCategoryRepo::add,
@@ -312,6 +342,18 @@ class BackupRepoImpl @Inject constructor(
                             if (recordToRecordTag != null) {
                                 dataHandler.recordToTag.invoke(recordToRecordTag)
                             }
+                        }
+                    }
+
+                    ROW_RUNNING_RECORD -> {
+                        runningRecordFromBackupString(parts).let {
+                            dataHandler.runningRecords.invoke(it)
+                        }
+                    }
+
+                    ROW_RUNNING_RECORD_TO_RECORD_TAG -> {
+                        runningRecordToRecordTagFromBackupString(parts).let {
+                            dataHandler.runningRecordToTag.invoke(it)
                         }
                     }
 
@@ -479,6 +521,24 @@ class BackupRepoImpl @Inject constructor(
             record.timeEnded.toString(),
             record.comment.cleanTabs().replaceNewline(),
             "", // record tag id is removed from record dbo
+        )
+    }
+
+    private fun toBackupString(runningRecord: RunningRecord): String {
+        return String.format(
+            "$ROW_RUNNING_RECORD\t%s\t%s\t%s\n",
+            runningRecord.id.toString(),
+            runningRecord.timeStarted.toString(),
+            runningRecord.comment.cleanTabs().replaceNewline(),
+        )
+    }
+
+    private fun toBackupString(runningRecordToRecordTag: RunningRecordToRecordTag): String {
+        return String.format(
+            "$ROW_RUNNING_RECORD_TO_RECORD_TAG\t%s\t%s\t%s\n",
+            runningRecordToRecordTag.runningRecordId.toString(),
+            runningRecordToRecordTag.recordTagId.toString(),
+            runningRecordToRecordTag.recordTagNumericValue?.toString().orEmpty(),
         )
     }
 
@@ -816,6 +876,25 @@ class BackupRepoImpl @Inject constructor(
         ).takeUnless { tagId == 0L }
     }
 
+    private fun runningRecordFromBackupString(parts: List<String>): RunningRecord {
+        return RunningRecord(
+            id = parts.getOrNull(1)?.toLongOrNull().orZero(),
+            timeStarted = parts.getOrNull(2)?.toLongOrNull().orZero(),
+            comment = parts.getOrNull(3)?.restoreNewline().orEmpty(),
+            tags = emptyList(), // Stored separately.
+        )
+    }
+
+    private fun runningRecordToRecordTagFromBackupString(
+        parts: List<String>,
+    ): RunningRecordToRecordTag {
+        return RunningRecordToRecordTag(
+            runningRecordId = parts.getOrNull(1)?.toLongOrNull().orZero(),
+            recordTagId = parts.getOrNull(2)?.toLongOrNull().orZero(),
+            recordTagNumericValue = parts.getOrNull(3)?.toDoubleOrNull(),
+        )
+    }
+
     private fun recordShortcutFromBackupString(parts: List<String>): RecordShortcut {
         val typeId = parts.getOrNull(2)?.toLongOrNull() ?: 1L
         val comment = parts.getOrNull(3)?.restoreNewline().orEmpty()
@@ -1118,6 +1197,8 @@ class BackupRepoImpl @Inject constructor(
     data class DataHandler(
         val types: suspend (RecordType) -> Unit,
         val records: suspend (Record) -> Unit,
+        val runningRecords: suspend (RunningRecord) -> Unit,
+        val runningRecordToTag: suspend (RunningRecordToRecordTag) -> Unit,
         val recordShortcuts: suspend (RecordShortcut) -> Unit,
         val categories: suspend (Category) -> Unit,
         val typeToCategory: suspend (RecordTypeCategory) -> Unit,
@@ -1143,6 +1224,8 @@ class BackupRepoImpl @Inject constructor(
         private const val BACKUP_IDENTIFICATION = "app simple time tracker"
         private const val ROW_RECORD_TYPE = "recordType"
         private const val ROW_RECORD = "record"
+        private const val ROW_RUNNING_RECORD = "runningRecord"
+        private const val ROW_RUNNING_RECORD_TO_RECORD_TAG = "runningRecordToRecordTag"
         private const val ROW_RECORD_SHORTCUT = "recordShortcut"
         private const val ROW_CATEGORY = "category"
         private const val ROW_TYPE_CATEGORY = "typeCategory"
